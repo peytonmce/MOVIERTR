@@ -1,3 +1,7 @@
+https://movie-rtr.onrender.com/
+
+⬆️⬆️VISIT THE SITE HERE ⬆️⬆️
+
 Hi!
 This is my first deployed application.
 This is MOVIERTR (Movie Rater)
