@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movie Rating App | Node.JS Express.JS SQLite</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/fanta.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.6.0/css/all.min.css"
+        integrity="sha512-Kc323vGBEqzTmouAECnVceyQqyqdsSiqLQISBL29aUW4U/M7pSPA/gEUZQqv1cwx4OnYxTxve5UMg5GT6L4JJg=="
+        crossorigin="anonymous" referrerpolicy="no-referrer" />
+</head>
+
+<body>
+    <section id="auth">
+        <div class="logo-container">
+            <img src="/logo.png" alt="Logo" class="logo" />
+        </div>
+        <div>
+            <h2 className="sign-up-text">Login</h2>
+            <p>Create an account!</p>
+        </div>
+
+        <p id="error" style="display: none;"></p>
+        <input id="emailInput" placeholder="Email" />
+        <input id="passwordInput" placeholder="********" type="password" />
+        <button id="authBtn" onclick="authenticate()">
+            Submit
+        </button>
+        <hr />
+        <div class="register-content">
+            <p>Don't have an account?</p>
+            <button onclick="toggleIsRegister()" id="registerBtn">Sign up</button>
+        </div>
+    </section>
+    <div id="dashboard" style="display: none;">
+        <div class="logo-container">
+            <img src="/logo.png" alt="Logo" class="logo" />
+        </div>
+        <header>
+            <h1 class="text-gradient">You have 0 movies rated.</h1>
+            <button id="logoutBtn" onclick="logout()">Logout</button>
+        </header>
+        <nav class="tab-container">
+            <button onclick="changeTab('All')" class="tab-button selected-tab">
+                <h4>All <span>(0)</span></h4>
+            </button>
+            <button onclick="changeTab('High')" class="tab-button">
+                <h4>High Rated <span>(0)</span></h4>
+            </button>
+            <button onclick="changeTab('Low')" class="tab-button">
+                <h4>Low Rated <span>(0)</span></h4>
+            </button>
+            <hr />
+        </nav>
+        <main>
+
+
+        </main>
+    </div>
+</body>
+<script>
+    let token = localStorage.getItem('token')
+
+    let isLoading = false
+    let isAuthenticating = false
+    let isRegistration = false
+    let selectedTab = 'All'
+    let movies = []
+
+    const apiBase = '/'
+
+    // elements
+    const dashboard = document.getElementById('dashboard')
+    const nav = document.querySelector('nav')
+    const header = document.querySelector('header')
+    const main = document.querySelector('main')
+    const navElements = document.querySelectorAll('.tab-button')
+    const authContent = document.getElementById('auth')
+    const textError = document.getElementById('error')
+    const email = document.getElementById('emailInput')
+    const password = document.getElementById('passwordInput')
+    const registerBtn = document.getElementById('registerBtn')
+    const authBtn = document.getElementById('authBtn')
+
+    // PAGE RENDERING LOGIC
+    async function showDashboard() {
+        dashboard.style.display = 'flex'
+        authContent.style.display = 'none'
+
+        await fetchMovies()
+    }
+
+    function updateHeaderText() {
+        const moviesLength = movies.length
+        const newString = movies.length === 1 ?
+            `You have rated 1 movie.` :
+            `You have rated ${moviesLength} movies.`
+        header.querySelector('h1').innerText = newString
+    }
+
+    function updateNavCount() {
+        navElements.forEach(ele => {
+            const btnText = ele.innerText.split(' ')[0]
+
+            // filter movies in here
+            const count = movies.filter(val => {
+                if (btnText === 'All') {
+                    return true
+                }
+                return btnText === 'High' ?
+                    val.rating >= 7 :
+                    val.rating < 7
+            }).length
+
+            // target inside space and update value
+            ele.querySelector('span').innerText = `(${count})`
+        })
+    }
+
+    function changeTab(tab) {
+        selectedTab = tab
+        navElements.forEach(val => {
+            if (val.innerText.includes(tab)) {
+                val.classList.add('selected-tab')
+            } else {
+                val.classList.remove('selected-tab')
+            }
+        })
+        renderMovies()
+    }
+
+    function renderMovies() {
+        updateNavCount()
+        updateHeaderText()
+
+        let movieList = ``
+        movies.filter(val => {
+            if (selectedTab === 'All') return true
+            if (selectedTab === 'High') return val.rating >= 7
+            return val.rating < 7
+        }).forEach((movie) => {
+            const movieId = movie.id
+            movieList += `
+            <div class="card todo-item">
+                <div>
+                    <p><strong>${movie.moviename}</strong></p>
+                    <p>Rating: ${'⭐'.repeat(movie.rating || 0)} (${movie.rating || 0}/10)</p>
+                </div>
+                <div class="todo-buttons">
+                    <button onclick="deleteMovie(${movieId})">
+                        <h6>Delete</h6>
+                    </button>
+                </div>
+            </div>
+            `
+        })
+        movieList += `
+        <div class="input-container">
+            <input id="movieInput" placeholder="Movie name" />
+            <input id="ratingInput" type="number" min="0" max="10" placeholder="Rating (0-10)" style="max-width: 150px;" />
+            <button onclick="addMovie()">
+                <i class="fa-solid fa-plus"></i>
+            </button>
+        </div>
+        `
+        main.innerHTML = movieList
+    }
+
+    // AUTH LOGIC
+
+    async function toggleIsRegister() {
+        isRegistration = !isRegistration
+        registerBtn.innerText = isRegistration ? 'Sign in' : 'Sign up'
+        document.querySelector('#auth > div:nth-child(2) h2').innerText = isRegistration ? 'Sign Up' : 'Login'
+        document.querySelector('.register-content p').innerText = isRegistration ? 'Already have an account?' : 'Don\'t have an account?'
+        document.querySelector('.register-content button').innerText = isRegistration ? 'Sign in' : 'Sign up'
+    }
+
+    async function authenticate() {
+        // access email and pass values
+        const emailVal = email.value
+        const passVal = password.value
+
+        // guard clauses... if authenticating, return
+        if (isLoading || isAuthenticating) { 
+            return 
+        }
+
+        // Validation checks with specific error messages
+        if (!emailVal || !passVal) {
+            error.innerText = '❌ Please fill in all fields'
+            error.style.display = 'block'
+            return
+        }
+
+        if (!emailVal.includes('@')) {
+            error.innerText = '❌ Please enter a valid email'
+            error.style.display = 'block'
+            return
+        }
+
+        if (passVal.length < 6) {
+            error.innerText = '❌ Password must be at least 6 characters'
+            error.style.display = 'block'
+            return
+        }
+
+        // reset error and set isAuthenticating to true
+        error.style.display = 'none'
+        isAuthenticating = true
+        authBtn.innerText = 'Authenticating...'
+
+        try {
+            let response
+            if (isRegistration) {
+                // register an account
+                response = await fetch(apiBase + 'auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: emailVal, password: passVal })
+                })
+            } else {
+                // login an account
+                response = await fetch(apiBase + 'auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username: emailVal, password: passVal })
+                })
+            }
+
+            const data = await response.json()
+
+            if (!response.ok) {
+                // Handle specific error responses from server
+                if (response.status === 404) {
+                    throw Error('❌ User not found')
+                } else if (response.status === 401) {
+                    throw Error('❌ Invalid password')
+                } else if (response.status === 503 && isRegistration) {
+                    throw Error('❌ Username already exists')
+                } else {
+                    throw Error(data.message || '❌ Authentication failed')
+                }
+            }
+
+            if (data.token) {
+                token = data.token
+                localStorage.setItem('token', token)
+
+                // authenicating into loading
+                authBtn.innerText = 'Loading...'
+
+                // fetch movies
+                await fetchMovies()
+
+                // show dashboard
+                showDashboard()
+            } else {
+                throw Error('❌ Failed to authenticate - no token received')
+            }
+
+        } catch (err) {
+            console.log(err.message)
+            error.innerText = err.message
+            error.style.display = 'block'
+        } finally {
+            authBtn.innerText = 'Submit'
+            isAuthenticating = false
+        }
+    }
+
+    function logout() {
+        localStorage.removeItem('token')
+        token = null
+        movies = []
+        location.reload()
+    }
+
+    // CRUD LOGIC
+
+    async function fetchMovies() {
+        isLoading = true
+        try {
+            const response = await fetch(apiBase + 'movies', {
+                headers: { 'Authorization': token }
+            })
+            const moviesData = await response.json()
+            movies = moviesData
+        } catch (err) {
+            console.error('Error fetching movies:', err)
+        } finally {
+            isLoading = false
+            renderMovies()
+        }
+    }
+
+    async function deleteMovie(id) {
+        try {
+            await fetch(apiBase + 'movies/' + id, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': token
+                },
+            })
+            fetchMovies()
+        } catch (err) {
+            console.error('Error deleting movie:', err)
+        }
+    }
+
+    async function addMovie() {
+        // have to access this val later as it's rendered with js
+        const movieInput = document.getElementById('movieInput')
+        const ratingInput = document.getElementById('ratingInput')
+        const moviename = movieInput.value
+        const rating = parseInt(ratingInput.value) || 0
+
+        if (!moviename) { return }
+        if (rating < 0 || rating > 10) {
+            alert('Rating must be between 0 and 10')
+            return
+        }
+
+        try {
+            await fetch(apiBase + 'movies', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': token
+                },
+                body: JSON.stringify({ moviename, rating })
+            })
+            movieInput.value = ''
+            ratingInput.value = ''
+            fetchMovies()
+        } catch (err) {
+            console.error('Error adding movie:', err)
+        }
+    }
+
+    // load page and read local storage for key
+    // if is authenticated, show movie app
+    if (token) {
+        async function run() {
+            try {
+                // Try to fetch movies to validate token
+                const response = await fetch(apiBase + 'movies', {
+                    headers: { 'Authorization': token }
+                })
+                
+                if (response.ok) {
+                    // Token is valid, show dashboard
+                    await fetchMovies()
+                    showDashboard()
+                } else {
+                    // Token is invalid, clear it and show login
+                    localStorage.removeItem('token')
+                    token = null
+                }
+            } catch (err) {
+                // Error validating token, clear it and show login
+                console.error('Error validating token:', err)
+                localStorage.removeItem('token')
+                token = null
+            }
+        }
+        run()
+    }
+</script>
+
+</html>
